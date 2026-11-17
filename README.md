@@ -1,8 +1,23 @@
-# 13-pjt — 올라 (Ola)
+# ⛰️ 올라 (Ola)
 
-> "산을 올라가다" + 스페인어 인사 Hola  
-> AI 기반 산행 안전 진단 및 실시간 위치 공유 서비스
-> <br>SSAFY(삼성소프트웨어아카데미) 1학기 경진대회 1위
+> **AI 기반 산행 안전 진단 · 실시간 위치 공유 서비스**
+> <br>"산을 올라가다" + 스페인어 인사 Hola
+
+**🏆 SSAFY 1학기 프로젝트 경진대회 최우수상 (반 1위, 2026.06)** · 2인 팀 · Vue 3 + Django + Claude/Gemini API
+
+출발 전에는 날씨·재난·일몰 데이터로 "지금 이 산에 가도 되는가"를 등급으로 알려 주고, 산행 중에는 6자리 코드 하나로 보호자와 위치를 공유합니다.
+
+> Railway에 배포해 운영했으며, 현재는 서버를 내려 서비스 중단 상태입니다.
+
+## 한눈에 보기
+
+| | |
+|---|---|
+| **문제** | 산행 안전 정보(날씨·산불·산사태·일몰)가 여러 기관에 흩어져 있고, 사고가 나도 보호자가 위치를 알 수 없다 |
+| **출발 전** | 공공데이터 5개 지표를 종합해 코스별 안전 등급(추천/주의/비추천)을 산출하고, 138개 산 중 오늘 조건에 맞는 산을 추천 |
+| **산행 중** | 6자리 코드 기반 세이프링크로 보호자에게 실시간 위치 공유, 30분·60분 미갱신 시 경고 |
+| **AI** | Claude Haiku 안전 브리핑, Gemini 개인화 조언, BM25 RAG 채팅(지식문서 31개 + 탐방로 302개 코스 + 실시간 컨텍스트) |
+| **설계 원칙** | 점수가 높아도 폭우·강풍·일몰 임박·산불 위험이면 룰로 등급을 강제 하향 — LLM은 설명만 하고 안전 판정은 규칙이 한다 |
 
 ---
 
@@ -10,16 +25,17 @@
 
 1. [팀원 정보 및 업무 분담](#1-팀원-정보-및-업무-분담)
 2. [목표 서비스 및 실제 구현 정도](#2-목표-서비스-및-실제-구현-정도)
-3. [데이터베이스 모델링 (ERD)](#3-데이터베이스-모델링-erd)
+3. [핵심 기능 설명](#3-핵심-기능-설명)
 4. [추천 알고리즘 기술 설명](#4-추천-알고리즘-기술-설명)
-5. [핵심 기능 설명](#5-핵심-기능-설명)
-6. [기능별 소스코드](#6-기능별-소스코드)
-7. [생성형 AI 활용](#7-생성형-ai-활용)
-8. [배포 서비스 URL](#8-배포-서비스-url)
-9. [프로젝트 구조](#9-프로젝트-구조)
-10. [실행 방법](#10-실행-방법)
-11. [환경 변수](#11-환경-변수)
-12. [구현 과정 회고](#12-구현-과정-회고)
+5. [생성형 AI 활용](#5-생성형-ai-활용)
+6. [데이터 소스](#6-데이터-소스)
+7. [구현 과정 회고](#7-구현-과정-회고)
+8. [데이터베이스 모델링 (ERD)](#8-데이터베이스-모델링-erd)
+9. [기능별 소스코드](#9-기능별-소스코드)
+10. [프로젝트 구조](#10-프로젝트-구조)
+11. [배포 구성](#11-배포-구성)
+12. [실행 방법](#12-실행-방법)
+13. [환경 변수](#13-환경-변수)
 
 ---
 
@@ -27,11 +43,8 @@
 
 | 이름 | 역할 | 담당 기능 |
 |------|------|-----------|
-| 장민준 | 팀장 | 전체 아키텍처 설계, 안전 스코어링 알고리즘, Railway 배포 |
-| 황도경 | 팀원 | 세이프링크 시스템, 프론트엔드 UI/UX 전반, AI 연동| |
-
-
-> 올라 웹페이지: Railway에 배포했었으나 현재는 서버를 내려 서비스 중단 상태입니다.
+| 장민준 | 팀장 | 서비스 기획, 전체 아키텍처·AI·API 구조 설계, 안전 스코어링 알고리즘, Railway 배포 |
+| 황도경 | 팀원 | 세이프링크 시스템, 프론트엔드 UI/UX 전반, AI 연동 |
 
 ---
 
@@ -71,78 +84,60 @@
 
 ---
 
-## 3. 데이터베이스 모델링 (ERD)
+## 3. 핵심 기능 설명
+
+### 3-1. 안전 코스 추천 탭
+
+- 출발 시간·희망 소요 시간·최대 이동 거리·경험 수준 입력
+- 15종 매력 태그(조망·계곡·단풍·가족·야경 등)로 산 필터링
+- AI 산 추천 → 오늘의 날씨·안전 지표 기반 산 순위 정렬
+- 산 클릭 시: 등산로 목록, Leaflet 지도(3색 경로), 재난위험지구 패널, 커뮤니티 안전 제보 표시
+- Claude Haiku 안전 브리핑 카드 (상단 고정)
+
+### 3-2. 세이프링크 (안전 공유 탭)
 
 ```
-┌──────────────┐       ┌──────────────────┐       ┌─────────────────┐
-│   User       │       │   Post           │       │   Comment       │
-│──────────────│  1:N  │──────────────────│  1:N  │─────────────────│
-│ id (PK)      │──────▶│ id (PK)          │──────▶│ id (PK)         │
-│ username     │       │ author (FK→User) │       │ post (FK→Post)  │
-│ password     │       │ title            │       │ author (FK→User)│
-│ nickname     │       │ content          │       │ content         │
-│ email        │       │ category         │       │ created_at      │
-│ created_at   │       │ mountain         │       └─────────────────┘
-└──────┬───────┘       │ like_count       │
-       │               │ created_at       │       ┌─────────────────┐
-       │               └──────────────────┘       │   PostLike      │
-       │                                          │─────────────────│
-       │  1:N          ┌──────────────────┐       │ id (PK)         │
-       │               │ AuthToken        │       │ post (FK→Post)  │
-       │               │──────────────────│       │ user (FK→User)  │
-       ├──────────────▶│ user (FK→User)   │       │ UNIQUE(post,user│
-       │               │ key              │       └─────────────────┘
-       │               │ expires_at       │
-       │               └──────────────────┘       ┌─────────────────┐
-       │                                          │  HikingRecord   │
-       │  1:N          ┌──────────────────┐       │─────────────────│
-       ├──────────────▶│ FavoriteCourse   │       │ id (PK)         │
-       │               │──────────────────│       │ user (FK→User)  │
-       │               │ user (FK→User)   │       │ mountain        │
-       │               │ course_id        │       │ course_name     │
-       │               │ course_name      │       │ distance_km     │
-       │               │ mountain         │       │ duration_min    │
-       │               │ UNIQUE(user,     │       │ hiked_date      │
-       │               │   course_id)     │       │ safety_label    │
-       │               └──────────────────┘       └─────────────────┘
-       │
-       │  1:N          ┌──────────────────┐
-       ├──────────────▶│ EmergencyContact │
-       │               │──────────────────│
-       │               │ user (FK→User)   │
-       │               │ name             │
-       │               │ phone            │
-       │               │ relation         │
-       │               └──────────────────┘
-       │
-       │               ┌──────────────────────┐       ┌──────────────────┐
-       │               │  SafeLinkSession      │  1:N  │  LocationLog     │
-       │               │──────────────────────│──────▶│──────────────────│
-       │               │ id (UUID, PK)         │       │ id (PK)          │
-       │               │ share_code (6자리     │       │ session (FK→SLS) │
-       │               │   UNIQUE)             │       │ lat, lng         │
-       │               │ mountain_name        │       │ recorded_at      │
-       │               │ course_name          │       └──────────────────┘
-       │               │ current_lat, lng     │
-       │               │ status (active/ended)│
-       │               │ created_at           │
-       │               │ last_updated         │
-       │               └──────────────────────┘
-
-┌──────────────────┐   ┌──────────────────┐   ┌──────────────────┐
-│  MountainTags    │   │  TrailCourse     │   │  MountainIntro   │
-│──────────────────│   │──────────────────│   │──────────────────│
-│ mountain_name    │   │ course_id (PK)   │   │ mountain_key     │
-│   (UNIQUE)       │   │ mountain         │   │   (UNIQUE)       │
-│ tags (JSONField) │   │ name             │   │ intro            │
-└──────────────────┘   │ difficulty       │   │ summary          │
-                       │ distance_km      │   │ detail           │
-                       │ duration_min     │   └──────────────────┘
-                       │ elevation_gain_m │
-                       │ lat, lng         │
-                       │ source           │
-                       └──────────────────┘
+산행자                          보호자
+───────                         ────────
+산행 시작 클릭
+  ↓
+SafeLinkSession DB 생성
+  ↓
+6자리 코드 발급 (예: A3K7PQ)
+  ↓
+코드 구두/문자 전달 ──────────▶  코드 6자리 입력
+                                  ↓
+GPS watchPosition 전송             20초 폴링으로 위치 수신
+  ↓                               ↓
+LocationLog 누적              파란 폴리라인으로 궤적 표시
+  ↓                               ↓
+  ·                           30분 미갱신 → 경고 마커·배너
+  ·                           60분 미갱신 → 긴급 팝업
+산행 종료 클릭
 ```
+
+**코드 생성 규칙**: `ABCDEFGHJKLMNPQRSTUVWXYZ23456789` 32자 (혼동 문자 0·O·I·1 제외), 6자리, 활성 세션과 충돌 검사 후 발급
+
+### 3-3. 보호자 뷰
+
+- `position: fixed` 풀스크린 지도 + 하단 정보 시트
+- Teleport to body로 사이드바 레이아웃 외부에 렌더링
+- 30분 미갱신: 빨간 Pulsing 마커 + 상단 경고 배너
+- 60분 미갱신: 긴급 모달 (119 신고 버튼)
+- 북한산 데모 시뮬레이션: 도선사→하루재 5단계 이동 체험
+
+### 3-4. 커뮤니티
+
+- 게시글 작성(일반·등산 후기·산 정보·안전 제보)·수정·삭제
+- 댓글·좋아요·팔로우 / 팔로잉 피드
+- 안전 제보 게시글은 코스 상세 화면에 연동
+
+### 3-5. 마이페이지
+
+- 즐겨찾기 코스 카드 그리드 → "산 정보 보기" 클릭 시 GuideTab 연결
+- 챌린지 배지 시스템
+- 내 활동: 작성글·좋아요한 글·댓글 탭 분리
+- 긴급 연락처 카드 (전화번호 tel: 링크)
 
 ---
 
@@ -238,192 +233,7 @@ total = min(max(raw, 0.0), 1.0) × 100
 
 ---
 
-## 5. 핵심 기능 설명
-
-### 5-1. 안전 코스 추천 탭
-
-- 출발 시간·희망 소요 시간·최대 이동 거리·경험 수준 입력
-- 15종 매력 태그(조망·계곡·단풍·가족·야경 등)로 산 필터링
-- AI 산 추천 → 오늘의 날씨·안전 지표 기반 산 순위 정렬
-- 산 클릭 시: 등산로 목록, Leaflet 지도(3색 경로), 재난위험지구 패널, 커뮤니티 안전 제보 표시
-- Claude Haiku 안전 브리핑 카드 (상단 고정)
-
-### 5-2. 세이프링크 (안전 공유 탭)
-
-```
-산행자                          보호자
-───────                         ────────
-산행 시작 클릭
-  ↓
-SafeLinkSession DB 생성
-  ↓
-6자리 코드 발급 (예: A3K7PQ)
-  ↓
-코드 구두/문자 전달 ──────────▶  코드 6자리 입력
-                                  ↓
-GPS watchPosition 전송             20초 폴링으로 위치 수신
-  ↓                               ↓
-LocationLog 누적              파란 폴리라인으로 궤적 표시
-  ↓                               ↓
-  ·                           30분 미갱신 → 경고 마커·배너
-  ·                           60분 미갱신 → 긴급 팝업
-산행 종료 클릭
-```
-
-**코드 생성 규칙**: `ABCDEFGHJKLMNPQRSTUVWXYZ23456789` 32자 (혼동 문자 0·O·I·1 제외), 6자리, 활성 세션과 충돌 검사 후 발급
-
-### 5-3. 보호자 뷰
-
-- `position: fixed` 풀스크린 지도 + 하단 정보 시트
-- Teleport to body로 사이드바 레이아웃 외부에 렌더링
-- 30분 미갱신: 빨간 Pulsing 마커 + 상단 경고 배너
-- 60분 미갱신: 긴급 모달 (119 신고 버튼)
-- 북한산 데모 시뮬레이션: 도선사→하루재 5단계 이동 체험
-
-### 5-4. 커뮤니티
-
-- 게시글 작성(일반·등산 후기·산 정보·안전 제보)·수정·삭제
-- 댓글·좋아요·팔로우 / 팔로잉 피드
-- 안전 제보 게시글은 코스 상세 화면에 연동
-
-### 5-5. 마이페이지
-
-- 즐겨찾기 코스 카드 그리드 → "산 정보 보기" 클릭 시 GuideTab 연결
-- 챌린지 배지 시스템
-- 내 활동: 작성글·좋아요한 글·댓글 탭 분리
-- 긴급 연락처 카드 (전화번호 tel: 링크)
-
----
-
-## 6. 기능별 소스코드
-
----
-
-### 6-1. 안전 코스 추천
-
-**주요 소스코드**
-
-| 파일 | 역할 |
-|------|------|
-| `frontend/src/views/GuideTab.vue` | 프로필 입력 폼, 산 선택, 탐방로 목록, 지도 표시 |
-| `backend/recommendations/services.py` | 5개 지표 점수 계산, 안전 등급 판정 |
-| `backend/recommendations/mountain_recommend.py` | 138개 산 순위 정렬 알고리즘 |
-| `backend/recommendations/llm_briefing.py` | Claude Haiku 브리핑 카드 생성 |
-
-```python
-# services.py — 안전 등급 강제 하향 룰 (점수와 무관)
-if rain_mm >= 10 or wind_ms >= 8 or sunlight_margin_min < 30 or wildfire == 'very_high':
-    grade = 'danger'
-elif weather_score < 0.75 or difficulty_fit < 0.40 or yellow_flags >= 2:
-    grade = 'caution'
-else:
-    grade = 'safe'
-```
-
----
-
-### 6-2. 세이프링크 (안전 공유)
-
-**주요 소스코드**
-
-| 파일 | 역할 |
-|------|------|
-| `frontend/src/views/SafeLinkTab.vue` | 산행 시작/종료, GPS 전송, 코드 공유 UI |
-| `backend/recommendations/safe_links.py` | 6자리 코드 발급, 세션 관리 |
-| `backend/recommendations/views.py` | `/api/safe-link/` 엔드포인트 |
-
-```python
-# safe_links.py — 혼동 문자 제외 6자리 코드 발급
-CHARSET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'  # 0·O·I·1 제외
-
-def generate_share_code():
-    while True:
-        code = ''.join(random.choices(CHARSET, k=6))
-        if not SafeLinkSession.objects.filter(share_code=code, status='active').exists():
-            return code
-```
-
----
-
-### 6-3. 보호자 실시간 뷰
-
-**주요 소스코드**
-
-| 파일 | 역할 |
-|------|------|
-| `frontend/src/views/GuardianView.vue` | 풀스크린 지도, 20초 폴링, 경고 로직 |
-| `frontend/src/views/GuardianCodeView.vue` | 6자리 코드 입력 화면 |
-
-```javascript
-// GuardianView.vue — 30분·60분 미갱신 경고
-const minutesSinceUpdate = computed(() =>
-  Math.floor((Date.now() - new Date(session.value.last_updated)) / 60000)
-);
-const isWarning = computed(() => minutesSinceUpdate.value >= 30);
-const isEmergency = computed(() => minutesSinceUpdate.value >= 60);
-```
-
----
-
-### 6-4. AI 도우미 채팅 (RAG)
-
-**주요 소스코드**
-
-| 파일 | 역할 |
-|------|------|
-| `frontend/src/views/ChatTab.vue` | 멀티턴 채팅 UI |
-| `backend/recommendations/chat_ai.py` | Gemini API 호출, 시스템 프롬프트 조립 |
-| `backend/recommendations/rag_retriever.py` | BM25 검색, 31개 지식문서 |
-
-```python
-# rag_retriever.py — 순수 파이썬 BM25 (외부 라이브러리 없음)
-def bm25_score(query_tokens, doc_tokens, avg_dl, k1=1.5, b=0.75):
-    score = 0.0
-    dl = len(doc_tokens)
-    for term in query_tokens:
-        tf = doc_tokens.count(term)
-        idf = math.log((N - df + 0.5) / (df + 0.5) + 1)
-        score += idf * (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * dl / avg_dl))
-    return score
-```
-
----
-
-### 6-5. 커뮤니티
-
-**주요 소스코드**
-
-| 파일 | 역할 |
-|------|------|
-| `frontend/src/views/CommunityTab.vue` | 게시판 목록·상세·작성 UI |
-| `backend/recommendations/community_views.py` | 게시글 CRUD, 댓글, 좋아요, 팔로우 |
-
-```python
-# community_views.py — 팔로잉 피드 (팔로우한 사람 글만 조회)
-@api_view(['GET'])
-@require_auth
-def following_posts(request):
-    following_ids = UserFollow.objects.filter(
-        follower=request.user
-    ).values_list('following_id', flat=True)
-    posts = Post.objects.filter(author_id__in=following_ids).order_by('-created_at')
-    return paginate_posts(posts, request)
-```
-
----
-
-### 6-6. 마이페이지
-
-**주요 소스코드**
-
-| 파일 | 역할 |
-|------|------|
-| `frontend/src/views/MyPageTab.vue` | 즐겨찾기, 배지, 산행 기록, 긴급 연락처 |
-| `backend/recommendations/views.py` | 사용자 프로필, 즐겨찾기, 연락처 API |
-
----
-
-## 7. 생성형 AI 활용
+## 5. 생성형 AI 활용
 
 ### 사용 모델
 
@@ -433,11 +243,11 @@ def following_posts(request):
 | AI 도우미 멀티턴 채팅 | Gemini 2.5 Flash Lite (`gemini-2.5-flash-lite`) | `GEMINI_API_KEY` |
 | 개인화 안전 조언 3줄 | Gemini 2.5 Flash Lite | `GEMINI_API_KEY` |
 
-### 6-1. Claude Haiku — 안전 브리핑 (`llm_briefing.py`)
+### 5-1. Claude Haiku — 안전 브리핑 (`llm_briefing.py`)
 
 코스 추천 결과 최상단에 표시되는 카드. 선택 산·날씨·난이도·재난 정보를 프롬프트에 주입해 "지금 이 산에 가도 되는가"를 3문장으로 요약한다. 동일 조건에 대해 1시간 Django 캐시 적용.
 
-### 6-2. Gemini — AI 도우미 채팅 (`chat_ai.py`)
+### 5-2. Gemini — AI 도우미 채팅 (`chat_ai.py`)
 
 **RAG(Retrieval-Augmented Generation) 파이프라인**:
 
@@ -461,7 +271,7 @@ Gemini API 호출 (max_output_tokens: 400)
 
 BM25는 외부 의존성 없이 순수 파이썬으로 구현해 서버 리소스를 최소화했다.
 
-### 6-3. Gemini — 개인화 안전 조언 (`safety_advice_ai.py`)
+### 5-3. Gemini — 개인화 안전 조언 (`safety_advice_ai.py`)
 
 산 선택 직후 사이드바에 표시. 선택 산·실시간 날씨·산행 목적·일몰 시간을 기반으로 "오늘 이 산을 오를 때 특히 주의할 점" 3줄을 생성한다.
 
@@ -473,44 +283,269 @@ BM25는 외부 의존성 없이 순수 파이썬으로 구현해 서버 리소�
 
 ---
 
-## 8. 배포 서비스 URL
+## 6. 데이터 소스
 
-| 항목 | 내용 |
-|------|------|
-| 서비스 URL | Railway에 배포했었으나 현재는 서버 중단 상태 |
-| 백엔드 | gunicorn + Django + PostgreSQL (Railway) |
-| 프론트엔드 | Vite 빌드 → WhiteNoise 정적 서빙 |
-
-### 배포 구성
-
-```
-Backend:  pip install -r requirements.txt
-          python manage.py migrate --noinput
-          python manage.py seed_mountain_descriptions
-          python manage.py seed_mountain_tags
-          gunicorn forestrx.wsgi
-
-Frontend: npm run build
-          → Django STATIC_ROOT에 번들 복사
-          → WhiteNoise로 서빙
-```
-
-### 커뮤니티 샘플 데이터
-
-Railway PostgreSQL에 fixture 데이터 적재 완료.
-
-| 항목 | 내용 |
-|------|------|
-| 사용자 | 5개 계정 (트레일버디·정상정복·안전산행·주말등산러·산악엄마) |
-| 게시글 | 8개 (북한산 백운대 후기, 설악산 단풍, 낙석 안전제보, 장비 추천 등) |
-| 댓글 | 9개 |
+| 데이터 | 연동 방식 | 상태 |
+|--------|-----------|------|
+| 국립공원공단 탐방로 CSV | 로컬 파일 파싱 | ✅ 302개 코스 (42개 산) |
+| 기상청 초단기실황 | 공공데이터포털 API | ✅ 10분 캐시 |
+| 한국천문연구원 일몰 | 공공데이터포털 API | ✅ |
+| 산림청 산불위험예보 | 공공데이터포털 API | ✅ |
+| 국토부 브이월드 등산로 | OpenAPI | ✅ 경로 geometry 포함 |
+| OSM Overpass 등산로 | 무료 퍼블릭 API | ✅ 24시간 캐시 |
+| 재난위험지구 | 로컬 CSV/JSON | ✅ |
+| 산사태 예측 | 공공데이터포털 API | ✅ |
+| NIFOS 산악기상 | 공공데이터포털 API | ✅ AI 컨텍스트 주입 |
+| 에어코리아 대기질 | 공공데이터포털 API | ✅ PM2.5·PM10 실시간 |
+| Claude Haiku | Anthropic API | ✅ 안전 브리핑 |
+| Gemini 2.5 Flash Lite | Google AI API | ✅ 채팅·안전 조언 |
+| Leaflet + OSM 타일 | 무료 (키 불필요) | ✅ |
 
 ---
 
-## 9. 프로젝트 구조
+## 7. 구현 과정 회고
+
+### 학습한 내용 및 새로 배운 것들
+
+**Vue 3 Composition API & 싱글톤 Composable 패턴**  
+Pinia/Vuex 없이 모듈 레벨 `ref`·`reactive`를 export해 탭 간 상태를 공유하는 패턴을 익혔다. 탭 전환(언마운트/마운트) 시에도 데이터가 유지된다는 점이 SPA에서 특히 유용했다.
+
+**CSS `position: fixed`와 containing block 문제**  
+조상 엘리먼트에 `overflow-x: hidden`과 `position: relative`가 동시에 적용되면 Chrome에서 fixed 자식의 containing block이 뷰포트가 아닌 해당 조상으로 바뀐다. Vue의 `<Teleport to="body">`로 DOM 트리 외부에 렌더링해 해결했다.
+
+**BM25 RAG 구현**  
+벡터 DB 없이 순수 파이썬으로 BM25 검색을 구현했다. 질의와 문서 간 단어 빈도 기반 유사도만으로도 산행 안전 도메인에서 충분한 검색 정확도를 얻을 수 있었다.
+
+**공공데이터 API 신뢰성 처리**  
+기상청·산림청 등 공공 API는 응답 지연·형식 오류가 잦다. `ThreadPoolExecutor`로 병렬 호출해 전체 대기 시간을 줄이고, 개별 API 실패 시 서비스 전체가 중단되지 않도록 try/except로 격리했다.
+
+**Leaflet 지도 경로 on-demand fetch**  
+지도 경로를 전부 미리 로드하면 초기 응답이 느려진다. 코스 선택 시에만 VWorld → OSM Overpass 순서로 경로를 요청하고 결과를 캐시에 저장하는 on-demand 패턴을 적용했다.
+
+### 어려웠던 부분
+
+- **GPS 백그라운드 추적 한계**: 웹 브라우저는 화면이 꺼지거나 다른 앱으로 전환되면 GPS 추적이 중단된다. Wake Lock API로 화면 꺼짐은 막았지만, 앱 전환은 막을 수 없어 사용자에게 명확히 안내하는 것으로 대응했다.
+- **다중 미디어 쿼리 CSS 우선순위**: 디자이너 합류 이후 동일 클래스에 대한 `@media` 블록이 파일 곳곳에 산재해 후순위 규칙이 의도치 않게 덮어쓰는 문제가 반복됐다. 미디어 쿼리의 소스 순서 우선 원칙을 재확인했다.
+- **공공 API 키 1개로 여러 API 사용**: 기상청·한국천문연구원·산림청이 모두 동일한 공공데이터포털 키를 사용하지만 서비스별 등록이 필요하다. 초기 설정 누락으로 특정 API만 인증 오류가 발생하는 상황을 겪었다.
+
+### 느낀 점
+
+세이프링크의 6자리 코드 방식은 URL보다 구두 전달이 쉬워 등산 상황에 적합하다고 판단했는데, 실제로 사용해보니 코드 발급 순간에 보호자에게 전달하는 행동 자체가 자연스러운 "산행 시작 의식"이 된다는 것을 느꼈다. 기술적 구현보다 사용자 행동 흐름 설계가 더 중요하다는 점을 배웠다.  
+
+AI 브리핑 기능은 같은 산이라도 날씨·시간대·목적에 따라 다른 조언을 생성하는데, 이를 위해 컨텍스트를 얼마나 구조화해 전달하느냐가 응답 품질을 결정한다는 것을 반복적인 프롬프트 실험을 통해 체감했다.
+
+---
+
+## 8. 데이터베이스 모델링 (ERD)
+
+<details>
+<summary>ERD 펼쳐 보기</summary>
 
 ```
-forest/
+┌──────────────┐       ┌──────────────────┐       ┌─────────────────┐
+│   User       │       │   Post           │       │   Comment       │
+│──────────────│  1:N  │──────────────────│  1:N  │─────────────────│
+│ id (PK)      │──────▶│ id (PK)          │──────▶│ id (PK)         │
+│ username     │       │ author (FK→User) │       │ post (FK→Post)  │
+│ password     │       │ title            │       │ author (FK→User)│
+│ nickname     │       │ content          │       │ content         │
+│ email        │       │ category         │       │ created_at      │
+│ created_at   │       │ mountain         │       └─────────────────┘
+└──────┬───────┘       │ like_count       │
+       │               │ created_at       │       ┌─────────────────┐
+       │               └──────────────────┘       │   PostLike      │
+       │                                          │─────────────────│
+       │  1:N          ┌──────────────────┐       │ id (PK)         │
+       │               │ AuthToken        │       │ post (FK→Post)  │
+       │               │──────────────────│       │ user (FK→User)  │
+       ├──────────────▶│ user (FK→User)   │       │ UNIQUE(post,user│
+       │               │ key              │       └─────────────────┘
+       │               │ expires_at       │
+       │               └──────────────────┘       ┌─────────────────┐
+       │                                          │  HikingRecord   │
+       │  1:N          ┌──────────────────┐       │─────────────────│
+       ├──────────────▶│ FavoriteCourse   │       │ id (PK)         │
+       │               │──────────────────│       │ user (FK→User)  │
+       │               │ user (FK→User)   │       │ mountain        │
+       │               │ course_id        │       │ course_name     │
+       │               │ course_name      │       │ distance_km     │
+       │               │ mountain         │       │ duration_min    │
+       │               │ UNIQUE(user,     │       │ hiked_date      │
+       │               │   course_id)     │       │ safety_label    │
+       │               └──────────────────┘       └─────────────────┘
+       │
+       │  1:N          ┌──────────────────┐
+       ├──────────────▶│ EmergencyContact │
+       │               │──────────────────│
+       │               │ user (FK→User)   │
+       │               │ name             │
+       │               │ phone            │
+       │               │ relation         │
+       │               └──────────────────┘
+       │
+       │               ┌──────────────────────┐       ┌──────────────────┐
+       │               │  SafeLinkSession      │  1:N  │  LocationLog     │
+       │               │──────────────────────│──────▶│──────────────────│
+       │               │ id (UUID, PK)         │       │ id (PK)          │
+       │               │ share_code (6자리     │       │ session (FK→SLS) │
+       │               │   UNIQUE)             │       │ lat, lng         │
+       │               │ mountain_name        │       │ recorded_at      │
+       │               │ course_name          │       └──────────────────┘
+       │               │ current_lat, lng     │
+       │               │ status (active/ended)│
+       │               │ created_at           │
+       │               │ last_updated         │
+       │               └──────────────────────┘
+
+┌──────────────────┐   ┌──────────────────┐   ┌──────────────────┐
+│  MountainTags    │   │  TrailCourse     │   │  MountainIntro   │
+│──────────────────│   │──────────────────│   │──────────────────│
+│ mountain_name    │   │ course_id (PK)   │   │ mountain_key     │
+│   (UNIQUE)       │   │ mountain         │   │   (UNIQUE)       │
+│ tags (JSONField) │   │ name             │   │ intro            │
+└──────────────────┘   │ difficulty       │   │ summary          │
+                       │ distance_km      │   │ detail           │
+                       │ duration_min     │   └──────────────────┘
+                       │ elevation_gain_m │
+                       │ lat, lng         │
+                       │ source           │
+                       └──────────────────┘
+```
+
+</details>
+
+---
+
+## 9. 기능별 소스코드
+
+<details>
+<summary>기능별 주요 파일과 코드 펼쳐 보기</summary>
+
+---
+
+### 9-1. 안전 코스 추천
+
+**주요 소스코드**
+
+| 파일 | 역할 |
+|------|------|
+| `frontend/src/views/GuideTab.vue` | 프로필 입력 폼, 산 선택, 탐방로 목록, 지도 표시 |
+| `backend/recommendations/services.py` | 5개 지표 점수 계산, 안전 등급 판정 |
+| `backend/recommendations/mountain_recommend.py` | 138개 산 순위 정렬 알고리즘 |
+| `backend/recommendations/llm_briefing.py` | Claude Haiku 브리핑 카드 생성 |
+
+```python
+# services.py — 안전 등급 강제 하향 룰 (점수와 무관)
+if rain_mm >= 10 or wind_ms >= 8 or sunlight_margin_min < 30 or wildfire == 'very_high':
+    grade = 'danger'
+elif weather_score < 0.75 or difficulty_fit < 0.40 or yellow_flags >= 2:
+    grade = 'caution'
+else:
+    grade = 'safe'
+```
+
+### 9-2. 세이프링크 (안전 공유)
+
+**주요 소스코드**
+
+| 파일 | 역할 |
+|------|------|
+| `frontend/src/views/SafeLinkTab.vue` | 산행 시작/종료, GPS 전송, 코드 공유 UI |
+| `backend/recommendations/safe_links.py` | 6자리 코드 발급, 세션 관리 |
+| `backend/recommendations/views.py` | `/api/safe-link/` 엔드포인트 |
+
+```python
+# safe_links.py — 혼동 문자 제외 6자리 코드 발급
+CHARSET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'  # 0·O·I·1 제외
+
+def generate_share_code():
+    while True:
+        code = ''.join(random.choices(CHARSET, k=6))
+        if not SafeLinkSession.objects.filter(share_code=code, status='active').exists():
+            return code
+```
+
+### 9-3. 보호자 실시간 뷰
+
+**주요 소스코드**
+
+| 파일 | 역할 |
+|------|------|
+| `frontend/src/views/GuardianView.vue` | 풀스크린 지도, 20초 폴링, 경고 로직 |
+| `frontend/src/views/GuardianCodeView.vue` | 6자리 코드 입력 화면 |
+
+```javascript
+// GuardianView.vue — 30분·60분 미갱신 경고
+const minutesSinceUpdate = computed(() =>
+  Math.floor((Date.now() - new Date(session.value.last_updated)) / 60000)
+);
+const isWarning = computed(() => minutesSinceUpdate.value >= 30);
+const isEmergency = computed(() => minutesSinceUpdate.value >= 60);
+```
+
+### 9-4. AI 도우미 채팅 (RAG)
+
+**주요 소스코드**
+
+| 파일 | 역할 |
+|------|------|
+| `frontend/src/views/ChatTab.vue` | 멀티턴 채팅 UI |
+| `backend/recommendations/chat_ai.py` | Gemini API 호출, 시스템 프롬프트 조립 |
+| `backend/recommendations/rag_retriever.py` | BM25 검색, 31개 지식문서 |
+
+```python
+# rag_retriever.py — 순수 파이썬 BM25 (외부 라이브러리 없음)
+def bm25_score(query_tokens, doc_tokens, avg_dl, k1=1.5, b=0.75):
+    score = 0.0
+    dl = len(doc_tokens)
+    for term in query_tokens:
+        tf = doc_tokens.count(term)
+        idf = math.log((N - df + 0.5) / (df + 0.5) + 1)
+        score += idf * (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * dl / avg_dl))
+    return score
+```
+
+### 9-5. 커뮤니티
+
+**주요 소스코드**
+
+| 파일 | 역할 |
+|------|------|
+| `frontend/src/views/CommunityTab.vue` | 게시판 목록·상세·작성 UI |
+| `backend/recommendations/community_views.py` | 게시글 CRUD, 댓글, 좋아요, 팔로우 |
+
+```python
+# community_views.py — 팔로잉 피드 (팔로우한 사람 글만 조회)
+@api_view(['GET'])
+@require_auth
+def following_posts(request):
+    following_ids = UserFollow.objects.filter(
+        follower=request.user
+    ).values_list('following_id', flat=True)
+    posts = Post.objects.filter(author_id__in=following_ids).order_by('-created_at')
+    return paginate_posts(posts, request)
+```
+
+### 9-6. 마이페이지
+
+**주요 소스코드**
+
+| 파일 | 역할 |
+|------|------|
+| `frontend/src/views/MyPageTab.vue` | 즐겨찾기, 배지, 산행 기록, 긴급 연락처 |
+| `backend/recommendations/views.py` | 사용자 프로필, 즐겨찾기, 연락처 API |
+
+</details>
+
+---
+
+## 10. 프로젝트 구조
+
+<details>
+<summary>디렉터리 구조 펼쳐 보기</summary>
+
+```
+Ola/
 ├── backend/
 │   ├── forestrx/
 │   │   └── settings.py              환경 변수 기반 보안 설정
@@ -570,9 +605,45 @@ forest/
 └── requirements.txt
 ```
 
+</details>
+
 ---
 
-## 10. 실행 방법
+## 11. 배포 구성
+
+| 항목 | 내용 |
+|------|------|
+| 서비스 URL | Railway에 배포했었으나 현재는 서버 중단 상태 |
+| 백엔드 | gunicorn + Django + PostgreSQL (Railway) |
+| 프론트엔드 | Vite 빌드 → WhiteNoise 정적 서빙 |
+
+### 빌드·실행 순서
+
+```
+Backend:  pip install -r requirements.txt
+          python manage.py migrate --noinput
+          python manage.py seed_mountain_descriptions
+          python manage.py seed_mountain_tags
+          gunicorn forestrx.wsgi
+
+Frontend: npm run build
+          → Django STATIC_ROOT에 번들 복사
+          → WhiteNoise로 서빙
+```
+
+### 커뮤니티 샘플 데이터
+
+Railway PostgreSQL에 fixture 데이터 적재 완료.
+
+| 항목 | 내용 |
+|------|------|
+| 사용자 | 5개 계정 (트레일버디·정상정복·안전산행·주말등산러·산악엄마) |
+| 게시글 | 8개 (북한산 백운대 후기, 설악산 단풍, 낙석 안전제보, 장비 추천 등) |
+| 댓글 | 9개 |
+
+---
+
+## 12. 실행 방법
 
 ### Backend
 
@@ -598,7 +669,7 @@ Vite 개발 서버가 `/api` 요청을 `http://127.0.0.1:8000`으로 프록시�
 
 ---
 
-## 11. 환경 변수
+## 13. 환경 변수
 
 | 변수 | 필수 | 설명 |
 |------|------|------|
@@ -608,56 +679,3 @@ Vite 개발 서버가 `/api` 요청을 `http://127.0.0.1:8000`으로 프록시�
 | `ANTHROPIC_API_KEY` | 선택 | Claude Haiku 안전 브리핑. 없으면 템플릿 폴백 |
 | `GEMINI_API_KEY` | 선택 | Gemini AI 도우미·안전 조언. 없으면 안내 메시지 반환 |
 | `DJANGO_DEBUG` | 선택 | `true` / `false` (기본 `false`) |
-
----
-
-## 12. 구현 과정 회고
-
-### 학습한 내용 및 새로 배운 것들
-
-**Vue 3 Composition API & 싱글톤 Composable 패턴**  
-Pinia/Vuex 없이 모듈 레벨 `ref`·`reactive`를 export해 탭 간 상태를 공유하는 패턴을 익혔다. 탭 전환(언마운트/마운트) 시에도 데이터가 유지된다는 점이 SPA에서 특히 유용했다.
-
-**CSS `position: fixed`와 containing block 문제**  
-조상 엘리먼트에 `overflow-x: hidden`과 `position: relative`가 동시에 적용되면 Chrome에서 fixed 자식의 containing block이 뷰포트가 아닌 해당 조상으로 바뀐다. Vue의 `<Teleport to="body">`로 DOM 트리 외부에 렌더링해 해결했다.
-
-**BM25 RAG 구현**  
-벡터 DB 없이 순수 파이썬으로 BM25 검색을 구현했다. 질의와 문서 간 단어 빈도 기반 유사도만으로도 산행 안전 도메인에서 충분한 검색 정확도를 얻을 수 있었다.
-
-**공공데이터 API 신뢰성 처리**  
-기상청·산림청 등 공공 API는 응답 지연·형식 오류가 잦다. `ThreadPoolExecutor`로 병렬 호출해 전체 대기 시간을 줄이고, 개별 API 실패 시 서비스 전체가 중단되지 않도록 try/except로 격리했다.
-
-**Leaflet 지도 경로 on-demand fetch**  
-지도 경로를 전부 미리 로드하면 초기 응답이 느려진다. 코스 선택 시에만 VWorld → OSM Overpass 순서로 경로를 요청하고 결과를 캐시에 저장하는 on-demand 패턴을 적용했다.
-
-### 어려웠던 부분
-
-- **GPS 백그라운드 추적 한계**: 웹 브라우저는 화면이 꺼지거나 다른 앱으로 전환되면 GPS 추적이 중단된다. Wake Lock API로 화면 꺼짐은 막았지만, 앱 전환은 막을 수 없어 사용자에게 명확히 안내하는 것으로 대응했다.
-- **다중 미디어 쿼리 CSS 우선순위**: 디자이너 합류 이후 동일 클래스에 대한 `@media` 블록이 파일 곳곳에 산재해 후순위 규칙이 의도치 않게 덮어쓰는 문제가 반복됐다. 미디어 쿼리의 소스 순서 우선 원칙을 재확인했다.
-- **공공 API 키 1개로 여러 API 사용**: 기상청·한국천문연구원·산림청이 모두 동일한 공공데이터포털 키를 사용하지만 서비스별 등록이 필요하다. 초기 설정 누락으로 특정 API만 인증 오류가 발생하는 상황을 겪었다.
-
-### 느낀 점
-
-세이프링크의 6자리 코드 방식은 URL보다 구두 전달이 쉬워 등산 상황에 적합하다고 판단했는데, 실제로 사용해보니 코드 발급 순간에 보호자에게 전달하는 행동 자체가 자연스러운 "산행 시작 의식"이 된다는 것을 느꼈다. 기술적 구현보다 사용자 행동 흐름 설계가 더 중요하다는 점을 배웠다.  
-
-AI 브리핑 기능은 같은 산이라도 날씨·시간대·목적에 따라 다른 조언을 생성하는데, 이를 위해 컨텍스트를 얼마나 구조화해 전달하느냐가 응답 품질을 결정한다는 것을 반복적인 프롬프트 실험을 통해 체감했다.
-
----
-
-## 데이터 소스
-
-| 데이터 | 연동 방식 | 상태 |
-|--------|-----------|------|
-| 국립공원공단 탐방로 CSV | 로컬 파일 파싱 | ✅ 302개 코스 (42개 산) |
-| 기상청 초단기실황 | 공공데이터포털 API | ✅ 10분 캐시 |
-| 한국천문연구원 일몰 | 공공데이터포털 API | ✅ |
-| 산림청 산불위험예보 | 공공데이터포털 API | ✅ |
-| 국토부 브이월드 등산로 | OpenAPI | ✅ 경로 geometry 포함 |
-| OSM Overpass 등산로 | 무료 퍼블릭 API | ✅ 24시간 캐시 |
-| 재난위험지구 | 로컬 CSV/JSON | ✅ |
-| 산사태 예측 | 공공데이터포털 API | ✅ |
-| NIFOS 산악기상 | 공공데이터포털 API | ✅ AI 컨텍스트 주입 |
-| 에어코리아 대기질 | 공공데이터포털 API | ✅ PM2.5·PM10 실시간 |
-| Claude Haiku | Anthropic API | ✅ 안전 브리핑 |
-| Gemini 2.5 Flash Lite | Google AI API | ✅ 채팅·안전 조언 |
-| Leaflet + OSM 타일 | 무료 (키 불필요) | ✅ |
